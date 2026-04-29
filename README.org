@@ -75,6 +75,13 @@ Consult previews in the preview posframe for supported commands.
 #+DOWNLOADED: screenshot @ 2026-04-29 21:07:05
 [[file:vertico-posframe-preview/2026-04-29_21-07-05_screenshot.png]]
 
+** Note on the Demo Setup
+
+The screenshots and GIF also use [[https://github.com/kn66/nucleo-completion.el][nucleo-completion.el]] for fuzzy matching.
+It uses a dynamic module for fast scoring, with prebuilt modules available for
+immediate use.  High-scoring candidates are highlighted, which makes useful
+items easier to spot in large completion lists.
+
 ** Usage
 
 Put the package on =load-path=, then enable both Vertico posframe and the

@@ -13,6 +13,10 @@ the current Vertico candidate shown by =vertico-posframe=.
 Consult integration is optional.  When Consult is loaded, the package mirrors
 Consult previews in the preview posframe for supported commands.
 
+** GIF
+
+[[file:vertico-posframe-preview/video.gif]]
+
 ** Screenshots
 
 *** execute-extended-command

@@ -1,0 +1,106 @@
+* vertico-posframe-preview
+
+=vertico-posframe-preview= displays a second posframe with preview content for
+the current Vertico candidate shown by =vertico-posframe=.
+
+** Requirements
+
+- Emacs 30.1 or later
+- posframe 1.4.0 or later
+- vertico 2.6 or later
+- vertico-posframe 0.9.2 or later
+
+Consult integration is optional.  When Consult is loaded, the package mirrors
+Consult previews in the preview posframe for supported commands.
+
+** Screenshots
+
+*** execute-extended-command
+:PROPERTIES:
+:ID:       44e56bb4-ce18-43d2-a399-974a26cc5987
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 20:45:10
+[[file:vertico-posframe-preview/2026-04-29_20-45-10_screenshot.png]]
+
+*** find-file
+:PROPERTIES:
+:ID:       f3541b86-6ca6-4d74-9c8b-f0d91eaa6488
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 20:46:15
+[[file:vertico-posframe-preview/2026-04-29_20-46-15_screenshot.png]]
+
+*** consult-buffer
+:PROPERTIES:
+:ID:       ca3fbdf4-b943-4ea7-845f-422d3f813cdc
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 20:47:55
+[[file:vertico-posframe-preview/2026-04-29_20-47-55_screenshot.png]]
+
+*** consult-line
+:PROPERTIES:
+:ID:       3cd700c7-07ba-4026-9cef-dd27d6185df7
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 20:48:44
+[[file:vertico-posframe-preview/2026-04-29_20-48-44_screenshot.png]]
+
+** Usage
+
+Put the package on =load-path=, then enable both Vertico posframe and the
+preview mode:
+
+#+begin_src emacs-lisp
+  (require 'vertico-posframe-preview)
+
+  (vertico-mode 1)
+  (vertico-posframe-mode 1)
+  (vertico-posframe-preview-mode 1)
+#+end_src
+
+Enable =vertico-posframe-preview-mode= after Consult has loaded if you want
+Consult preview mirroring.  If Consult is loaded later, call:
+
+#+begin_src emacs-lisp
+  (vertico-posframe-preview-refresh-integrations)
+#+end_src
+
+The default preview function supports common file, buffer, location, grep,
+imenu, and xref candidates.  Customize
+=vertico-posframe-preview-category-functions= or
+=vertico-posframe-preview-command-functions= to add command-specific previews.
+
+** Compatibility Notes
+
+This package intentionally advises private APIs from =vertico-posframe= and
+Consult in order to place and synchronize the preview frame:
+
+- =vertico-posframe--show=
+- =vertico-posframe--minibuffer-exit-hook=
+- =vertico-posframe-cleanup=
+- =consult--with-preview-f=
+- =consult-imenu--flatten=
+
+Those functions are not stable public APIs.  If a dependency changes one of
+these internals, this package may need an update even when byte compilation
+still succeeds.  The dependency versions in the package header are the tested
+baseline.
+
+** Tests
+
+Run the unit tests with:
+
+#+begin_src sh
+  emacs --batch -Q \
+        -L /path/to/posframe \
+        -L /path/to/vertico \
+        -L /path/to/vertico-posframe \
+        -L . \
+        -l test/vertico-posframe-preview-test.el \
+        -f ert-run-tests-batch-and-exit
+#+end_src
+
+The tests cover non-graphical preview helpers.  Posframe placement should still
+be checked manually in a graphical Emacs session.

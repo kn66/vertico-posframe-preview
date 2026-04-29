@@ -644,10 +644,14 @@ MATCHES is a list of match begin/end pairs relative to POSITION."
 
 (defun vertico-posframe-preview-imenu (candidate)
   "Return imenu preview content for CANDIDATE."
-  (let* ((item (if (consp candidate)
-                   candidate
+  (let* ((item (cond
+                ((or (markerp candidate) (integerp candidate))
+                 candidate)
+                ((consp candidate)
+                 candidate)
+                ((stringp candidate)
                  (or (get-text-property 0 'vertico-posframe-preview-imenu candidate)
-                     (get-text-property 0 'imenu-choice candidate))))
+                     (get-text-property 0 'imenu-choice candidate)))))
          (position (cdr-safe item)))
     (vertico-posframe-preview--position (or position item))))
 

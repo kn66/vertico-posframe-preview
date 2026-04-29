@@ -51,5 +51,14 @@
                  'face
                  content))))))
 
+(ert-deftest vertico-posframe-preview-imenu-accepts-marker-candidates ()
+  (with-temp-buffer
+    (insert "alpha\nbeta\ngamma\n")
+    (let ((marker (copy-marker 8))
+          (vertico-posframe-preview-location-context 0)
+          (vertico-posframe-preview-auto-location-context nil))
+      (should (string-match-p "beta"
+                              (vertico-posframe-preview-imenu marker))))))
+
 (provide 'vertico-posframe-preview-test)
 ;;; vertico-posframe-preview-test.el ends here

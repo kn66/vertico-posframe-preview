@@ -31,6 +31,22 @@ Consult previews in the preview posframe for supported commands.
 #+DOWNLOADED: screenshot @ 2026-04-29 20:46:15
 [[file:vertico-posframe-preview/2026-04-29_20-46-15_screenshot.png]]
 
+*** xref-find-references
+:PROPERTIES:
+:ID:       0841ef1a-c9d3-47b6-930c-f2b04290679e
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 21:08:09
+[[file:vertico-posframe-preview/2026-04-29_21-08-09_screenshot.png]]
+
+*** project-switch-project
+:PROPERTIES:
+:ID:       240df7d3-0c9a-4f65-976b-4d17ab7d239b
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 21:10:33
+[[file:vertico-posframe-preview/2026-04-29_21-10-33_screenshot.png]]
+
 *** consult-buffer
 :PROPERTIES:
 :ID:       ca3fbdf4-b943-4ea7-845f-422d3f813cdc
@@ -46,6 +62,14 @@ Consult previews in the preview posframe for supported commands.
 
 #+DOWNLOADED: screenshot @ 2026-04-29 20:48:44
 [[file:vertico-posframe-preview/2026-04-29_20-48-44_screenshot.png]]
+
+*** consult-imenu
+:PROPERTIES:
+:ID:       b62b5e46-f8a2-4af6-9fca-c456fb0a8638
+:END:
+
+#+DOWNLOADED: screenshot @ 2026-04-29 21:07:05
+[[file:vertico-posframe-preview/2026-04-29_21-07-05_screenshot.png]]
 
 ** Usage
 

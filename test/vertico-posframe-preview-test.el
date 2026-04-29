@@ -60,5 +60,40 @@
       (should (string-match-p "beta"
                               (vertico-posframe-preview-imenu marker))))))
 
+(ert-deftest vertico-posframe-preview-frame-color-falls-back-from-unspecified ()
+  (cl-letf (((symbol-function 'face-attribute)
+             (lambda (face attribute &rest _)
+               (pcase (list face attribute)
+                 ('(vertico-posframe :background) "unspecified-bg")
+                 ('(default :background) "#eeeeee"))))
+            ((symbol-function 'frame-parameter)
+             (lambda (&rest _) "#111111")))
+    (should (equal (vertico-posframe-preview--frame-color
+                    :background 'background-color "white")
+                   "#eeeeee"))))
+
+(ert-deftest vertico-posframe-preview-frame-color-uses-hard-fallback ()
+  (cl-letf (((symbol-function 'face-attribute)
+             (lambda (&rest _) "unspecified-bg"))
+            ((symbol-function 'frame-parameter)
+             (lambda (&rest _) nil)))
+    (should (equal (vertico-posframe-preview--frame-color
+                    :background 'background-color "white")
+                   "white"))))
+
+(ert-deftest vertico-posframe-preview-apply-layout-reserves-preview-width-for-category ()
+  (with-temp-buffer
+    (let ((vertico-posframe-preview-golden-ratio-size t)
+          (vertico-posframe-preview-category-functions
+           '((imenu . vertico-posframe-preview-imenu))))
+      (cl-letf (((symbol-function 'vertico-posframe-preview--golden-ratio-size)
+                 (lambda ()
+                   '(:candidate-width 40 :preview-width 70 :full-width 112 :height 20)))
+                ((symbol-function 'vertico-posframe-preview--completion-category)
+                 (lambda () 'imenu)))
+        (vertico-posframe-preview--apply-layout (current-buffer) nil)
+        (should (= vertico-posframe-width 40))
+        (should (= vertico-posframe-min-width 40))))))
+
 (provide 'vertico-posframe-preview-test)
 ;;; vertico-posframe-preview-test.el ends here

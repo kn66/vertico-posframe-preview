@@ -196,6 +196,23 @@ When nil, location previews use
 ;; Posframe internal, used to align the preview frame with the candidate frame.
 (defvar posframe--frame)
 
+(defun vertico-posframe-preview--specified-color-p (color)
+  "Return non-nil when COLOR is a concrete color string."
+  (and (stringp color)
+       (not (string-prefix-p "unspecified" color))
+       (color-defined-p color)))
+
+(defun vertico-posframe-preview--frame-color (attribute parameter fallback)
+  "Return a concrete color for ATTRIBUTE, frame PARAMETER, or FALLBACK."
+  (or (cl-loop for face in '(vertico-posframe default)
+               for color = (face-attribute face attribute nil t)
+               when (vertico-posframe-preview--specified-color-p color)
+               return color)
+      (let ((color (frame-parameter nil parameter)))
+        (and (vertico-posframe-preview--specified-color-p color)
+             color))
+      fallback))
+
 (defun vertico-posframe-preview--consult-imenu-flatten-filter (items)
   "Add preview location properties to Consult imenu ITEMS."
   (dolist (item items)
@@ -396,11 +413,21 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
       (let ((context vertico-posframe-preview-location-context))
         (cons context context)))))
 
+(defun vertico-posframe-preview--preview-available-p ()
+  "Return non-nil when the current completion can show a preview."
+  (let ((category (vertico-posframe-preview--completion-category)))
+    (or (assoc category vertico-posframe-preview-category-functions)
+        (and (eq category 'multi-category)
+             vertico-posframe-preview-category-functions)
+        (assq this-command vertico-posframe-preview-command-functions)
+        minibuffer-completing-file-name)))
+
 (defun vertico-posframe-preview--apply-layout (buffer &optional content)
   "Apply fixed preview layout variables to minibuffer BUFFER."
   (when-let* ((size (vertico-posframe-preview--golden-ratio-size)))
     (with-current-buffer buffer
-      (let ((candidate-width (if content
+      (let ((candidate-width (if (or content
+                                     (vertico-posframe-preview--preview-available-p))
                                  (plist-get size :candidate-width)
                                (plist-get size :full-width))))
         (setq-local vertico-posframe-width candidate-width)
@@ -721,8 +748,12 @@ MATCHES is a list of match begin/end pairs relative to POSITION."
                                (buffer-local-value
                                 'vertico-posframe-preview-poshandler buffer))
                  :font (buffer-local-value 'vertico-posframe-font buffer)
-                 :background-color (face-attribute 'vertico-posframe :background nil t)
-                 :foreground-color (face-attribute 'vertico-posframe :foreground nil t)
+                 :background-color
+                 (vertico-posframe-preview--frame-color
+                  :background 'background-color "white")
+                 :foreground-color
+                 (vertico-posframe-preview--frame-color
+                  :foreground 'foreground-color "black")
                  :border-width (buffer-local-value 'vertico-posframe-border-width buffer)
                  :border-color (vertico-posframe--get-border-color)
                  :override-parameters (buffer-local-value 'vertico-posframe-preview-parameters buffer)

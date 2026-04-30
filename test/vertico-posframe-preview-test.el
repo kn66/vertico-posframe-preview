@@ -31,6 +31,28 @@
         (should (equal (buffer-string) "abcd"))
         (should (= (point) (point-min)))))))
 
+(ert-deftest vertico-posframe-preview-directory-entries-respects-limit ()
+  (let ((directory (make-temp-file "vertico-posframe-preview-" t)))
+    (unwind-protect
+        (let ((vertico-posframe-preview-directory-max-entries 2))
+          (dolist (file '("a" "b" "c"))
+            (with-temp-file (expand-file-name file directory)))
+          (should (equal (vertico-posframe-preview--directory-entries
+                          directory)
+                         '("a" "b" "..."))))
+      (delete-directory directory t))))
+
+(ert-deftest vertico-posframe-preview-directory-entries-allows-unlimited ()
+  (let ((directory (make-temp-file "vertico-posframe-preview-" t)))
+    (unwind-protect
+        (let ((vertico-posframe-preview-directory-max-entries nil))
+          (dolist (file '("a" "b" "c"))
+            (with-temp-file (expand-file-name file directory)))
+          (should (equal (vertico-posframe-preview--directory-entries
+                          directory)
+                         '("a" "b" "c"))))
+      (delete-directory directory t))))
+
 (ert-deftest vertico-posframe-preview-position-marker-copies-integers ()
   (with-temp-buffer
     (insert "one\ntwo\nthree\n")

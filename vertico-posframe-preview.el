@@ -125,6 +125,12 @@ selected frame width."
   "Maximum number of characters copied into vertico-posframe preview."
   :type 'natnum)
 
+(defcustom vertico-posframe-preview-directory-max-entries 200
+  "Maximum number of directory entries shown in file previews.
+
+Set this to nil to list all entries."
+  :type '(choice (const nil) natnum))
+
 (defcustom vertico-posframe-preview-cache-size 100
   "Maximum number of preview contents cached per Vertico session.
 
@@ -628,6 +634,18 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
         (when minibuffer-completing-file-name
           (vertico-posframe-preview-file candidate)))))
 
+(defun vertico-posframe-preview--directory-entries (directory)
+  "Return a bounded list of preview entries for DIRECTORY."
+  (let* ((limit vertico-posframe-preview-directory-max-entries)
+         (entries (directory-files directory
+                                   nil
+                                   directory-files-no-dot-files-regexp
+                                   nil
+                                   (and limit (1+ limit)))))
+    (if (and limit (> (length entries) limit))
+        (append (butlast entries) '("..."))
+      entries)))
+
 (defun vertico-posframe-preview-file (candidate)
   "Return file preview content for CANDIDATE."
   (let ((file (expand-file-name (substring-no-properties candidate))))
@@ -638,7 +656,7 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
         (buffer-string)))
      ((file-directory-p file)
       (mapconcat #'identity
-                 (directory-files file nil directory-files-no-dot-files-regexp)
+                 (vertico-posframe-preview--directory-entries file)
                  "\n")))))
 
 (defun vertico-posframe-preview-buffer (candidate)

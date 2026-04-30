@@ -95,6 +95,13 @@ preview mode:
   (vertico-posframe-preview-mode 1)
 #+end_src
 
+To toggle preview visibility during a Vertico session, bind
+=vertico-posframe-preview-toggle= in =vertico-map=:
+
+#+begin_src emacs-lisp
+  (keymap-set vertico-map "C-t" #'vertico-posframe-preview-toggle)
+#+end_src
+
 Enable =vertico-posframe-preview-mode= after Consult has loaded if you want
 Consult preview mirroring.  If Consult is loaded later, call:
 

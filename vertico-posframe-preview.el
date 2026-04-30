@@ -186,6 +186,7 @@ When nil, location previews use
 (defvar-local vertico-posframe-preview--content nil)
 (defvar-local vertico-posframe-preview--content-set nil)
 (defvar-local vertico-posframe-preview--exiting nil)
+(defvar-local vertico-posframe-preview--suspended nil)
 (defvar vertico-posframe-preview--quit-commands
   '(abort-recursive-edit keyboard-quit minibuffer-keyboard-quit)
   "Commands which should immediately hide the preview frame.")
@@ -230,6 +231,8 @@ When nil, location previews use
            (if-let* ((window (active-minibuffer-window))
                      (buffer (window-buffer window))
                      ((not (buffer-local-value 'vertico-posframe-preview--exiting
+                                               buffer)))
+                     ((not (buffer-local-value 'vertico-posframe-preview--suspended
                                                buffer)))
                      (preview-function
                       (buffer-local-value 'vertico-posframe-preview-function buffer))
@@ -343,6 +346,7 @@ When nil, location previews use
   "Setup vertico-posframe preview cleanup."
   (when vertico-posframe-preview-mode
     (setq-local vertico-posframe-preview--exiting nil)
+    (setq-local vertico-posframe-preview--suspended nil)
     (vertico-posframe-preview--apply-layout (current-buffer))
     (add-hook 'pre-command-hook
               #'vertico-posframe-preview--pre-command-hook
@@ -415,12 +419,13 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
 
 (defun vertico-posframe-preview--preview-available-p ()
   "Return non-nil when the current completion can show a preview."
-  (let ((category (vertico-posframe-preview--completion-category)))
-    (or (assoc category vertico-posframe-preview-category-functions)
-        (and (eq category 'multi-category)
-             vertico-posframe-preview-category-functions)
-        (assq this-command vertico-posframe-preview-command-functions)
-        minibuffer-completing-file-name)))
+  (unless vertico-posframe-preview--suspended
+    (let ((category (vertico-posframe-preview--completion-category)))
+      (or (assoc category vertico-posframe-preview-category-functions)
+          (and (eq category 'multi-category)
+               vertico-posframe-preview-category-functions)
+          (assq this-command vertico-posframe-preview-command-functions)
+          minibuffer-completing-file-name))))
 
 (defun vertico-posframe-preview--apply-layout (buffer &optional content)
   "Apply fixed preview layout variables to minibuffer BUFFER."
@@ -529,6 +534,7 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
 (defun vertico-posframe-preview--content (buffer)
   "Return preview content for the current candidate in BUFFER."
   (when-let* (((not (buffer-local-value 'vertico-posframe-preview--exiting buffer)))
+              ((not (buffer-local-value 'vertico-posframe-preview--suspended buffer)))
               (function (buffer-local-value 'vertico-posframe-preview-function buffer))
               (candidate (with-current-buffer buffer
                            (vertico-posframe-preview--current-candidate))))
@@ -771,6 +777,36 @@ MATCHES is a list of match begin/end pairs relative to POSITION."
                                  (max 1 vertico-count)))))
         (vertico-posframe-preview--sync-frame-to-candidate))
     (posframe-hide vertico-posframe-preview--buffer)))
+
+(defun vertico-posframe-preview--refresh ()
+  "Refresh Vertico display after preview visibility changes."
+  (when (and (minibufferp)
+             (fboundp 'vertico--exhibit))
+    (setq-local vertico-posframe-preview--content nil)
+    (setq-local vertico-posframe-preview--content-set nil)
+    (vertico--exhibit)))
+
+;;;###autoload
+(defun vertico-posframe-preview-toggle ()
+  "Toggle preview visibility for the active Vertico minibuffer.
+
+When called outside an active minibuffer, toggle
+`vertico-posframe-preview-mode' globally."
+  (interactive)
+  (if (and (minibufferp)
+           vertico-posframe-preview-mode)
+      (progn
+        (setq-local vertico-posframe-preview--suspended
+                    (not vertico-posframe-preview--suspended))
+        (if vertico-posframe-preview--suspended
+            (vertico-posframe-preview--hide (current-buffer))
+          (setq-local vertico-posframe-preview--exiting nil))
+        (vertico-posframe-preview--refresh)
+        (message "vertico-posframe-preview %s"
+                 (if vertico-posframe-preview--suspended
+                     "hidden"
+                   "shown")))
+    (call-interactively #'vertico-posframe-preview-mode)))
 
 (defun vertico-posframe-preview--show (buffer)
   "Show preview posframe for Vertico minibuffer BUFFER."

@@ -95,5 +95,23 @@
         (should (= vertico-posframe-width 40))
         (should (= vertico-posframe-min-width 40))))))
 
+(ert-deftest vertico-posframe-preview-preview-available-p-honors-suspended-state ()
+  (with-temp-buffer
+    (let ((vertico-posframe-preview--suspended t)
+          (vertico-posframe-preview-category-functions
+           '((imenu . vertico-posframe-preview-imenu))))
+      (cl-letf (((symbol-function 'vertico-posframe-preview--completion-category)
+                 (lambda () 'imenu)))
+        (should-not (vertico-posframe-preview--preview-available-p))))))
+
+(ert-deftest vertico-posframe-preview-content-honors-suspended-state ()
+  (with-temp-buffer
+    (let ((vertico-posframe-preview--suspended t)
+          (vertico-posframe-preview--exiting nil)
+          (vertico-posframe-preview-function (lambda (_) "preview")))
+      (cl-letf (((symbol-function 'vertico-posframe-preview--current-candidate)
+                 (lambda () "candidate")))
+        (should-not (vertico-posframe-preview--content (current-buffer)))))))
+
 (provide 'vertico-posframe-preview-test)
 ;;; vertico-posframe-preview-test.el ends here

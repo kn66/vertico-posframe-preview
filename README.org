@@ -79,8 +79,8 @@ Consult previews in the preview posframe for supported commands.
 
 The screenshots and GIF also use [[https://github.com/kn66/nucleo-completion.el][nucleo-completion.el]] for fuzzy matching.
 It uses a dynamic module for fast scoring, with prebuilt modules available for
-immediate use.  High-scoring candidates are highlighted, which makes useful
-items easier to spot in large completion lists.
+immediate use.  High-scoring candidates are highlighted with bold and underline,
+which makes useful items easier to spot in large completion lists.
 
 ** Usage
 
@@ -129,6 +129,10 @@ Those functions are not stable public APIs.  If a dependency changes one of
 these internals, this package may need an update even when byte compilation
 still succeeds.  The dependency versions in the package header are the tested
 baseline.
+
+=vertico-grid= may not work well with this package.  The preview layout assumes
+a single candidate list posframe placed next to a preview posframe, while
+=vertico-grid= changes how candidates are arranged.
 
 ** Tests
 

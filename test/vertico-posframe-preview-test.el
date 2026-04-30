@@ -7,6 +7,8 @@
 (require 'ert)
 (require 'vertico-posframe-preview)
 
+(defvar vertico-posframe-preview-test--calls 0)
+
 (ert-deftest vertico-posframe-preview-target-uses-multi-category-property ()
   (let ((candidate (propertize "display" 'multi-category '(file . "/tmp/example"))))
     (cl-letf (((symbol-function 'vertico-posframe-preview--completion-category)
@@ -112,6 +114,48 @@
       (cl-letf (((symbol-function 'vertico-posframe-preview--current-candidate)
                  (lambda () "candidate")))
         (should-not (vertico-posframe-preview--content (current-buffer)))))))
+
+(ert-deftest vertico-posframe-preview-content-caches-session-results ()
+  (with-temp-buffer
+    (let ((vertico-posframe-preview-test--calls 0)
+          (vertico-posframe-preview--content-cache
+           (make-hash-table :test #'equal))
+          (vertico-posframe-preview--content-cache-keys nil)
+          (vertico-posframe-preview-cache-size 10)
+          (vertico-posframe-preview--suspended nil)
+          (vertico-posframe-preview--exiting nil)
+          (vertico-posframe-preview-function
+           (lambda (_)
+             (cl-incf vertico-posframe-preview-test--calls)
+             "preview")))
+      (cl-letf (((symbol-function 'vertico-posframe-preview--current-candidate)
+                 (lambda () "candidate"))
+                ((symbol-function 'vertico-posframe-preview--completion-category)
+                 (lambda () 'file)))
+        (should (equal (vertico-posframe-preview--content (current-buffer))
+                       "preview"))
+        (should (equal (vertico-posframe-preview--content (current-buffer))
+                       "preview"))
+        (should (= vertico-posframe-preview-test--calls 1))))))
+
+(ert-deftest vertico-posframe-preview-content-cache-size-zero-disables-cache ()
+  (with-temp-buffer
+    (let ((vertico-posframe-preview-test--calls 0)
+          (vertico-posframe-preview--content-cache
+           (make-hash-table :test #'equal))
+          (vertico-posframe-preview--content-cache-keys nil)
+          (vertico-posframe-preview-cache-size 0)
+          (vertico-posframe-preview--suspended nil)
+          (vertico-posframe-preview--exiting nil)
+          (vertico-posframe-preview-function
+           (lambda (_)
+             (cl-incf vertico-posframe-preview-test--calls)
+             "preview")))
+      (cl-letf (((symbol-function 'vertico-posframe-preview--current-candidate)
+                 (lambda () "candidate")))
+        (vertico-posframe-preview--content (current-buffer))
+        (vertico-posframe-preview--content (current-buffer))
+        (should (= vertico-posframe-preview-test--calls 2))))))
 
 (provide 'vertico-posframe-preview-test)
 ;;; vertico-posframe-preview-test.el ends here

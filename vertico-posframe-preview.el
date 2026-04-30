@@ -125,6 +125,12 @@ selected frame width."
   "Maximum number of characters copied into vertico-posframe preview."
   :type 'natnum)
 
+(defcustom vertico-posframe-preview-cache-size 100
+  "Maximum number of preview contents cached per Vertico session.
+
+Set this to 0 to disable preview content caching."
+  :type 'natnum)
+
 (defcustom vertico-posframe-preview-location-context 5
   "Number of context lines shown around a location preview."
   :type 'natnum)
@@ -185,8 +191,12 @@ When nil, location previews use
 (defvar vertico-posframe-preview-mode nil)
 (defvar-local vertico-posframe-preview--content nil)
 (defvar-local vertico-posframe-preview--content-set nil)
+(defvar-local vertico-posframe-preview--content-cache nil)
+(defvar-local vertico-posframe-preview--content-cache-keys nil)
 (defvar-local vertico-posframe-preview--exiting nil)
 (defvar-local vertico-posframe-preview--suspended nil)
+(defconst vertico-posframe-preview--cache-miss
+  (make-symbol "vertico-posframe-preview-cache-miss"))
 (defvar vertico-posframe-preview--quit-commands
   '(abort-recursive-edit keyboard-quit minibuffer-keyboard-quit)
   "Commands which should immediately hide the preview frame.")
@@ -347,6 +357,9 @@ When nil, location previews use
   (when vertico-posframe-preview-mode
     (setq-local vertico-posframe-preview--exiting nil)
     (setq-local vertico-posframe-preview--suspended nil)
+    (setq-local vertico-posframe-preview--content-cache
+                (make-hash-table :test #'equal))
+    (setq-local vertico-posframe-preview--content-cache-keys nil)
     (vertico-posframe-preview--apply-layout (current-buffer))
     (add-hook 'pre-command-hook
               #'vertico-posframe-preview--pre-command-hook
@@ -531,19 +544,61 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
     (ignore-errors
       (vertico--candidate))))
 
+(defun vertico-posframe-preview--content-cache-key (function candidate)
+  "Return a cache key for FUNCTION and CANDIDATE in the minibuffer."
+  (list function
+        this-command
+        (vertico-posframe-preview--completion-category)
+        candidate
+        (and (stringp candidate)
+             (text-properties-at 0 candidate))))
+
+(defun vertico-posframe-preview--content-cache-get (key)
+  "Return cached preview content for KEY, or cache miss sentinel."
+  (if (and vertico-posframe-preview--content-cache
+           (> vertico-posframe-preview-cache-size 0))
+      (gethash key
+               vertico-posframe-preview--content-cache
+               vertico-posframe-preview--cache-miss)
+    vertico-posframe-preview--cache-miss))
+
+(defun vertico-posframe-preview--content-cache-put (key content)
+  "Cache preview CONTENT for KEY."
+  (when (and vertico-posframe-preview--content-cache
+             (> vertico-posframe-preview-cache-size 0))
+    (when (eq (gethash key
+                       vertico-posframe-preview--content-cache
+                       vertico-posframe-preview--cache-miss)
+              vertico-posframe-preview--cache-miss)
+      (push key vertico-posframe-preview--content-cache-keys)
+      (when (> (length vertico-posframe-preview--content-cache-keys)
+               vertico-posframe-preview-cache-size)
+        (let ((oldest (car (last vertico-posframe-preview--content-cache-keys))))
+          (setq vertico-posframe-preview--content-cache-keys
+                (butlast vertico-posframe-preview--content-cache-keys))
+          (remhash oldest vertico-posframe-preview--content-cache))))
+    (puthash key content vertico-posframe-preview--content-cache)))
+
 (defun vertico-posframe-preview--content (buffer)
   "Return preview content for the current candidate in BUFFER."
-  (when-let* (((not (buffer-local-value 'vertico-posframe-preview--exiting buffer)))
-              ((not (buffer-local-value 'vertico-posframe-preview--suspended buffer)))
-              (function (buffer-local-value 'vertico-posframe-preview-function buffer))
-              (candidate (with-current-buffer buffer
-                           (vertico-posframe-preview--current-candidate))))
-    (condition-case err
-        (with-current-buffer buffer
-          (funcall function candidate))
-      (error
-       (message "vertico-posframe-preview: %s" (error-message-string err))
-       nil))))
+  (with-current-buffer buffer
+    (when-let* (((not vertico-posframe-preview--exiting))
+                ((not vertico-posframe-preview--suspended))
+                (function vertico-posframe-preview-function)
+                (candidate (vertico-posframe-preview--current-candidate)))
+      (let* ((key (vertico-posframe-preview--content-cache-key function candidate))
+             (cached (vertico-posframe-preview--content-cache-get key)))
+        (if (not (eq cached vertico-posframe-preview--cache-miss))
+            cached
+          (let ((content
+                 (condition-case err
+                     (funcall function candidate)
+                   (error
+                    (message "vertico-posframe-preview: %s"
+                             (error-message-string err))
+                    nil))))
+            (vertico-posframe-preview--content-cache-put key content)
+            content))))))
 
 (defun vertico-posframe-preview--completion-category ()
   "Return the current completion category, or nil."

@@ -131,12 +131,6 @@ selected frame width."
 Set this to nil to list all entries."
   :type '(choice (const nil) natnum))
 
-(defcustom vertico-posframe-preview-cache-size 100
-  "Maximum number of preview contents cached per Vertico session.
-
-Set this to 0 to disable preview content caching."
-  :type 'natnum)
-
 (defcustom vertico-posframe-preview-location-context 5
   "Number of context lines shown around a location preview."
   :type 'natnum)
@@ -191,18 +185,31 @@ When nil, location previews use
 `vertico-posframe-preview-location-context' exactly."
   :type 'boolean)
 
+(defcustom vertico-posframe-preview-io-timeout 0.3
+  "Seconds to wait for filesystem I/O when generating a preview.
+
+Used as a hard cap around `file-regular-p', `file-directory-p',
+`directory-files', and `insert-file-contents' so that pathological
+candidates (slow network shares, unresponsive automounts, etc.)
+cannot freeze the UI.  Set to nil to disable the timeout."
+  :type '(choice (const :tag "No timeout" nil) number))
+
+(defcustom vertico-posframe-preview-binary-detect-bytes 512
+  "Number of leading bytes inspected to decide if a file is binary.
+
+When the inspected bytes contain a NUL byte, the file is treated
+as binary and skipped by `vertico-posframe-preview-file'.  Set to
+nil or 0 to disable the check."
+  :type '(choice (const :tag "Disabled" nil) natnum))
+
 (defvar vertico-posframe-preview--buffer " *vertico-posframe-preview*")
 (defvar vertico-posframe-preview--consult-buffer nil)
 (defvar vertico-posframe-preview--frame nil)
 (defvar vertico-posframe-preview-mode nil)
 (defvar-local vertico-posframe-preview--content nil)
 (defvar-local vertico-posframe-preview--content-set nil)
-(defvar-local vertico-posframe-preview--content-cache nil)
-(defvar-local vertico-posframe-preview--content-cache-keys nil)
 (defvar-local vertico-posframe-preview--exiting nil)
 (defvar-local vertico-posframe-preview--suspended nil)
-(defconst vertico-posframe-preview--cache-miss
-  (make-symbol "vertico-posframe-preview-cache-miss"))
 (defvar vertico-posframe-preview--quit-commands
   '(abort-recursive-edit keyboard-quit minibuffer-keyboard-quit)
   "Commands which should immediately hide the preview frame.")
@@ -260,8 +267,16 @@ When nil, location previews use
                (vertico-posframe-preview--show-content buffer content)
              (posframe-hide vertico-posframe-preview--buffer)))
           ('exit
-           (when-let* ((window (active-minibuffer-window)))
-             (vertico-posframe-preview--hide (window-buffer window)))))))))
+           ;; `consult--with-preview-f' calls the state with `exit' from its
+           ;; unwind-protect cleanup, which runs *after* the recursive
+           ;; minibuffer has been torn down.  At that point
+           ;; `(active-minibuffer-window)' refers to the surrounding (e.g.
+           ;; find-file) minibuffer, so flagging that buffer as exiting via
+           ;; `vertico-posframe-preview--hide' would prevent its preview from
+           ;; ever showing again.  Hide the posframe only; the per-minibuffer
+           ;; `minibuffer-exit-hook' marks the actually-exiting buffer.
+           (when (get-buffer vertico-posframe-preview--buffer)
+             (posframe-hide vertico-posframe-preview--buffer))))))))
 
 (defun vertico-posframe-preview--consult-with-preview-advice
     (function preview-key state transform candidate save-input body)
@@ -363,9 +378,6 @@ When nil, location previews use
   (when vertico-posframe-preview-mode
     (setq-local vertico-posframe-preview--exiting nil)
     (setq-local vertico-posframe-preview--suspended nil)
-    (setq-local vertico-posframe-preview--content-cache
-                (make-hash-table :test #'equal))
-    (setq-local vertico-posframe-preview--content-cache-keys nil)
     (vertico-posframe-preview--apply-layout (current-buffer))
     (add-hook 'pre-command-hook
               #'vertico-posframe-preview--pre-command-hook
@@ -376,21 +388,61 @@ When nil, location previews use
 
 (defun vertico-posframe-preview--hide (&optional buffer)
   "Hide the vertico-posframe preview frame.
-When BUFFER is non-nil, mark its preview as exiting before hiding."
+When BUFFER is non-nil, mark its preview as exiting before hiding.
+
+This only hides the posframe so it can be reused by an outer
+recursive minibuffer.  Use `vertico-posframe-preview-cleanup' to
+fully delete the frame and buffer."
   (when buffer
     (with-current-buffer buffer
       (setq-local vertico-posframe-preview--exiting t)))
+  (when (get-buffer vertico-posframe-preview--buffer)
+    (posframe-hide vertico-posframe-preview--buffer)))
+
+(defun vertico-posframe-preview--delete-frame ()
+  "Delete the preview posframe and its buffer."
   (when (frame-live-p vertico-posframe-preview--frame)
     (let ((delete-frame-functions nil))
       (delete-frame vertico-posframe-preview--frame)))
   (setq vertico-posframe-preview--frame nil)
-  (posframe-delete-frame vertico-posframe-preview--buffer)
-  (redisplay t))
+  (posframe-delete-frame vertico-posframe-preview--buffer))
+
+(defun vertico-posframe-preview--candidate-posframe-buffer ()
+  "Return the buffer used by `vertico-posframe' for candidates, if any."
+  (and (boundp 'vertico-posframe--buffer)
+       vertico-posframe--buffer
+       (buffer-live-p vertico-posframe--buffer)
+       vertico-posframe--buffer))
+
+(defun vertico-posframe-preview--ensure-candidate-hidden ()
+  "Defensively hide the `vertico-posframe' candidate posframe.
+
+Used as a belt-and-suspenders cleanup so that frame state from a
+recursive minibuffer (for example `consult-dir' invoked from
+`find-file') cannot outlive its exit when our advice ordering
+interacts unexpectedly with
+`vertico-posframe--minibuffer-exit-hook'."
+  (when-let* ((buffer (vertico-posframe-preview--candidate-posframe-buffer)))
+    (ignore-errors (posframe-hide buffer))))
 
 (defun vertico-posframe-preview--hide-advice (&rest _)
-  "Hide preview frame when vertico-posframe hides its own frame."
-  (vertico-posframe-preview--hide (and (minibufferp)
-                                       (current-buffer))))
+  "Hide preview frame when vertico-posframe hides its own frame.
+Also defensively hides the candidate posframe.
+
+When a recursive minibuffer (e.g. `consult-dir' invoked from
+`find-file') exits, also delete the preview child frame outright.
+While inner was active the preview frame was created as a child
+of an outer posframe child frame; reusing that frame for the
+surviving outer minibuffer leaves the preview parented to the
+wrong frame and positioned in the wrong coordinate system, which
+manifests as the preview never reappearing for the outer
+command.  Forcing a fresh frame on the next show fixes that."
+  (ignore-errors
+    (vertico-posframe-preview--hide (and (minibufferp)
+                                         (current-buffer))))
+  (vertico-posframe-preview--ensure-candidate-hidden)
+  (when (> (minibuffer-depth) 1)
+    (ignore-errors (vertico-posframe-preview--delete-frame))))
 
 (defun vertico-posframe-preview--pre-command-hook ()
   "Hide the preview frame before commands which quit the minibuffer."
@@ -398,16 +450,38 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
     (vertico-posframe-preview--hide (current-buffer))))
 
 (defun vertico-posframe-preview--minibuffer-exit-hook ()
-  "Hide the vertico-posframe preview frame."
-  (vertico-posframe-preview--hide (current-buffer)))
+  "Hide the vertico-posframe preview frame.
+Also defensively hides the candidate posframe in case recursive
+minibuffer interaction left it visible."
+  (ignore-errors
+    (vertico-posframe-preview--hide (current-buffer)))
+  (vertico-posframe-preview--ensure-candidate-hidden))
+
+(defun vertico-posframe-preview--root-frame (frame)
+  "Walk FRAME up to the topmost non-child Emacs frame.
+
+Recursive minibuffers can leave `vertico-posframe-last-window'
+pointing at a window inside a posframe child frame.  Sizing the
+candidate/preview posframes from that small child frame produces
+a near-invisible inner posframe.  Resolving to the root frame
+keeps sizes anchored to the user-visible Emacs frame."
+  (let ((current frame)
+        (seen nil))
+    (while (and (frame-live-p current)
+                (frame-parent current)
+                (not (memq current seen)))
+      (push current seen)
+      (setq current (frame-parent current)))
+    current))
 
 (defun vertico-posframe-preview--golden-ratio-size ()
   "Return fixed candidate and preview sizes based on the Emacs frame."
   (when vertico-posframe-preview-golden-ratio-size
     (let* ((window (vertico-posframe-last-window))
-           (frame (if (window-live-p window)
-                      (window-frame window)
-                    (selected-frame)))
+           (raw-frame (if (window-live-p window)
+                          (window-frame window)
+                        (selected-frame)))
+           (frame (vertico-posframe-preview--root-frame raw-frame))
            (width (max 20 (frame-width frame)))
            (height (max 1 (frame-height frame)))
            (phi (/ (+ 1 (sqrt 5.0)) 2))
@@ -469,6 +543,16 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
 
 (defun vertico-posframe-preview--set-size-advice (buffer &rest _)
   "Set fixed Vertico posframe size for BUFFER before it is shown."
+  ;; Invariant: if `vertico-posframe--show' is being called for BUFFER,
+  ;; that buffer is being displayed and therefore cannot be in an
+  ;; exiting state.  Clear any stale `--exiting' flag here so that
+  ;; phantom state left behind by recursive minibuffer interactions
+  ;; (e.g. consult-dir invoked from find-file) cannot suppress the
+  ;; surviving outer buffer's preview indefinitely.
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when vertico-posframe-preview--exiting
+        (setq-local vertico-posframe-preview--exiting nil))))
   (let ((content (vertico-posframe-preview--content buffer)))
     (with-current-buffer buffer
       (setq-local vertico-posframe-preview--content content)
@@ -550,61 +634,19 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
     (ignore-errors
       (vertico--candidate))))
 
-(defun vertico-posframe-preview--content-cache-key (function candidate)
-  "Return a cache key for FUNCTION and CANDIDATE in the minibuffer."
-  (list function
-        this-command
-        (vertico-posframe-preview--completion-category)
-        candidate
-        (and (stringp candidate)
-             (text-properties-at 0 candidate))))
-
-(defun vertico-posframe-preview--content-cache-get (key)
-  "Return cached preview content for KEY, or cache miss sentinel."
-  (if (and vertico-posframe-preview--content-cache
-           (> vertico-posframe-preview-cache-size 0))
-      (gethash key
-               vertico-posframe-preview--content-cache
-               vertico-posframe-preview--cache-miss)
-    vertico-posframe-preview--cache-miss))
-
-(defun vertico-posframe-preview--content-cache-put (key content)
-  "Cache preview CONTENT for KEY."
-  (when (and vertico-posframe-preview--content-cache
-             (> vertico-posframe-preview-cache-size 0))
-    (when (eq (gethash key
-                       vertico-posframe-preview--content-cache
-                       vertico-posframe-preview--cache-miss)
-              vertico-posframe-preview--cache-miss)
-      (push key vertico-posframe-preview--content-cache-keys)
-      (when (> (length vertico-posframe-preview--content-cache-keys)
-               vertico-posframe-preview-cache-size)
-        (let ((oldest (car (last vertico-posframe-preview--content-cache-keys))))
-          (setq vertico-posframe-preview--content-cache-keys
-                (butlast vertico-posframe-preview--content-cache-keys))
-          (remhash oldest vertico-posframe-preview--content-cache))))
-    (puthash key content vertico-posframe-preview--content-cache)))
-
 (defun vertico-posframe-preview--content (buffer)
   "Return preview content for the current candidate in BUFFER."
-  (with-current-buffer buffer
-    (when-let* (((not vertico-posframe-preview--exiting))
-                ((not vertico-posframe-preview--suspended))
-                (function vertico-posframe-preview-function)
-                (candidate (vertico-posframe-preview--current-candidate)))
-      (let* ((key (vertico-posframe-preview--content-cache-key function candidate))
-             (cached (vertico-posframe-preview--content-cache-get key)))
-        (if (not (eq cached vertico-posframe-preview--cache-miss))
-            cached
-          (let ((content
-                 (condition-case err
-                     (funcall function candidate)
-                   (error
-                    (message "vertico-posframe-preview: %s"
-                             (error-message-string err))
-                    nil))))
-            (vertico-posframe-preview--content-cache-put key content)
-            content))))))
+  (when-let* (((not (buffer-local-value 'vertico-posframe-preview--exiting buffer)))
+              ((not (buffer-local-value 'vertico-posframe-preview--suspended buffer)))
+              (function (buffer-local-value 'vertico-posframe-preview-function buffer))
+              (candidate (with-current-buffer buffer
+                           (vertico-posframe-preview--current-candidate))))
+    (condition-case err
+        (with-current-buffer buffer
+          (funcall function candidate))
+      (error
+       (message "vertico-posframe-preview: %s" (error-message-string err))
+       nil))))
 
 (defun vertico-posframe-preview--completion-category ()
   "Return the current completion category, or nil."
@@ -634,6 +676,32 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
         (when minibuffer-completing-file-name
           (vertico-posframe-preview-file candidate)))))
 
+(defmacro vertico-posframe-preview--with-io-timeout (&rest body)
+  "Run BODY under `with-timeout' using `vertico-posframe-preview-io-timeout'.
+Returns nil when the timeout fires.  When the option is nil, BODY
+runs without a timeout."
+  (declare (indent 0) (debug t))
+  `(if vertico-posframe-preview-io-timeout
+       (with-timeout (vertico-posframe-preview-io-timeout nil)
+         ,@body)
+     (progn ,@body)))
+
+(defun vertico-posframe-preview--binary-file-p (file)
+  "Return non-nil when FILE looks binary based on a leading-byte scan.
+
+Reads up to `vertico-posframe-preview-binary-detect-bytes' bytes
+and treats the file as binary if a NUL byte is found.  Returns
+nil when detection is disabled or the file is empty."
+  (when-let* ((bytes vertico-posframe-preview-binary-detect-bytes)
+              ((natnump bytes))
+              ((> bytes 0)))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (let ((coding-system-for-read 'binary))
+        (insert-file-contents-literally file nil 0 bytes))
+      (goto-char (point-min))
+      (search-forward "\0" nil t))))
+
 (defun vertico-posframe-preview--directory-entries (directory)
   "Return a bounded list of preview entries for DIRECTORY."
   (let* ((limit vertico-posframe-preview-directory-max-entries)
@@ -647,17 +715,37 @@ When BUFFER is non-nil, mark its preview as exiting before hiding."
       entries)))
 
 (defun vertico-posframe-preview-file (candidate)
-  "Return file preview content for CANDIDATE."
-  (let ((file (expand-file-name (substring-no-properties candidate))))
-    (cond
-     ((file-regular-p file)
-      (with-temp-buffer
-        (insert-file-contents file nil 0 vertico-posframe-preview-max-size)
-        (buffer-string)))
-     ((file-directory-p file)
-      (mapconcat #'identity
-                 (vertico-posframe-preview--directory-entries file)
-                 "\n")))))
+  "Return file preview content for CANDIDATE.
+
+Remote (TRAMP) paths are skipped to avoid blocking the UI on
+network I/O when previewing candidates from sources such as
+`consult-dir-tramp-ssh-hosts'.  Local I/O is bounded by
+`vertico-posframe-preview-io-timeout'.  Files whose leading bytes
+contain a NUL are treated as binary and skipped.
+
+Applies `substitute-in-file-name' to CANDIDATE before resolving
+so that path shadowing (e.g. \"/old/path//c:/new/path/\" produced
+by `consult-dir-shadow-filenames'), `~/', and environment
+variables are handled the same way `find-file' would."
+  (let ((raw (ignore-errors
+               (substitute-in-file-name
+                (substring-no-properties candidate)))))
+    (when (and raw
+               (not (file-remote-p raw))
+               (not (file-remote-p default-directory)))
+      (let ((file (ignore-errors (expand-file-name raw))))
+        (when (and file (not (file-remote-p file)))
+          (vertico-posframe-preview--with-io-timeout
+            (cond
+             ((file-regular-p file)
+              (unless (vertico-posframe-preview--binary-file-p file)
+                (with-temp-buffer
+                  (insert-file-contents file nil 0 vertico-posframe-preview-max-size)
+                  (buffer-string))))
+             ((file-directory-p file)
+              (mapconcat #'identity
+                         (vertico-posframe-preview--directory-entries file)
+                         "\n")))))))))
 
 (defun vertico-posframe-preview-buffer (candidate)
   "Return buffer preview content for CANDIDATE."
@@ -733,18 +821,42 @@ MATCHES is a list of match begin/end pairs relative to POSITION."
              point title matches)))))))
 
 (defun vertico-posframe-preview-location (candidate)
-  "Return location preview content for CANDIDATE."
-  (if-let* ((location (and (stringp candidate)
-                           (get-text-property 0 'consult-location candidate))))
-      (vertico-posframe-preview--position (car location))
-    (vertico-posframe-preview--position (or (car-safe candidate) candidate))))
+  "Return location preview content for CANDIDATE.
+
+CANDIDATE is a Consult location: a propertized string carrying a
+`consult-location' text property whose car is a marker, or a cons
+cell `(MARKER . _)' for callers that pass the raw location."
+  (cond
+   ((and (stringp candidate)
+         (get-text-property 0 'consult-location candidate))
+    (vertico-posframe-preview--position
+     (car (get-text-property 0 'consult-location candidate))))
+   ((consp candidate)
+    (vertico-posframe-preview--position (car candidate)))
+   ((or (markerp candidate) (integerp candidate))
+    (vertico-posframe-preview--position candidate))))
+
+(defun vertico-posframe-preview--find-file-noselect-local (file)
+  "Open FILE with `find-file-noselect' unless it is remote.
+Returns nil for remote paths so callers can skip the preview
+without blocking the UI on TRAMP I/O."
+  (unless (file-remote-p file)
+    (find-file-noselect file)))
 
 (defun vertico-posframe-preview-grep (candidate)
-  "Return grep location preview content for CANDIDATE."
+  "Return grep location preview content for CANDIDATE.
+
+Skipped when the surrounding `default-directory' is remote, since
+`consult--grep-position' would otherwise resolve the candidate
+against a TRAMP path and block on network I/O."
   (when (and (stringp candidate)
-             (fboundp 'consult--grep-position))
-    (when-let* ((position (ignore-errors
-                            (consult--grep-position candidate #'find-file-noselect)))
+             (fboundp 'consult--grep-position)
+             (not (file-remote-p default-directory)))
+    (when-let* ((position
+                 (ignore-errors
+                   (consult--grep-position
+                    candidate
+                    #'vertico-posframe-preview--find-file-noselect-local)))
                 (marker (car-safe position)))
       (vertico-posframe-preview--position marker nil (cdr position)))))
 
@@ -761,17 +873,30 @@ MATCHES is a list of match begin/end pairs relative to POSITION."
          (position (cdr-safe item)))
     (vertico-posframe-preview--position (or position item))))
 
+(defun vertico-posframe-preview--xref-location-remote-p (location)
+  "Return non-nil when xref LOCATION points to a remote file.
+Uses `xref-location-group', which is conventionally the file
+path for file-backed locations.  This avoids realising the
+location into a marker (which would open the file via TRAMP)."
+  (when (and location (fboundp 'xref-location-group))
+    (let ((group (ignore-errors (xref-location-group location))))
+      (and (stringp group) (file-remote-p group)))))
+
 (defun vertico-posframe-preview-xref (candidate)
-  "Return xref preview content for CANDIDATE."
+  "Return xref preview content for CANDIDATE.
+
+Remote xref locations are skipped to avoid blocking the UI on
+TRAMP I/O when the marker is materialised."
   (when (and (fboundp 'xref-item-location)
              (fboundp 'xref-location-marker))
     (let* ((xref (or (and (stringp candidate)
                           (get-text-property 0 'consult-xref candidate))
                      (if (consp candidate) (cdr candidate) candidate)))
-           (location (ignore-errors (xref-item-location xref)))
-           (marker (and location
-                        (ignore-errors (xref-location-marker location)))))
-      (vertico-posframe-preview--position marker))))
+           (location (ignore-errors (xref-item-location xref))))
+      (unless (vertico-posframe-preview--xref-location-remote-p location)
+        (when-let* ((marker (and location
+                                 (ignore-errors (xref-location-marker location)))))
+          (vertico-posframe-preview--position marker))))))
 
 (defun vertico-posframe-preview--insert-content (content max-size)
   "Insert CONTENT up to MAX-SIZE into current preview buffer."
@@ -881,6 +1006,49 @@ When called outside an active minibuffer, toggle
                    "shown")))
     (call-interactively #'vertico-posframe-preview-mode)))
 
+;;;###autoload
+(defun vertico-posframe-preview-diagnose ()
+  "Print preview state for the active minibuffer to *Messages*.
+Useful when the preview unexpectedly fails to appear: invoke this
+via \\[execute-extended-command] from inside the minibuffer (or
+right after returning from a recursive command) and check the
+result in *Messages*."
+  (interactive)
+  (let* ((mb (active-minibuffer-window))
+         (buf (and mb (window-buffer mb))))
+    (message
+     (concat
+      "vertico-posframe-preview state:\n"
+      (format "  active-minibuffer-window: %S\n" mb)
+      (format "  buffer:                   %S (live=%S)\n"
+              buf (and buf (buffer-live-p buf)))
+      (format "  minibuffer-depth:         %S\n" (minibuffer-depth))
+      (format "  preview-mode:             %S\n" vertico-posframe-preview-mode)
+      (when (and buf (buffer-live-p buf))
+        (with-current-buffer buf
+          (format
+           (concat "  --exiting:                %S\n"
+                   "  --suspended:              %S\n"
+                   "  --content-set:            %S\n"
+                   "  preview-function:         %S\n"
+                   "  vertico--total:           %S\n"
+                   "  vertico--index:           %S\n"
+                   "  default-directory:        %S\n")
+           vertico-posframe-preview--exiting
+           vertico-posframe-preview--suspended
+           vertico-posframe-preview--content-set
+           vertico-posframe-preview-function
+           (and (boundp 'vertico--total) vertico--total)
+           (and (boundp 'vertico--index) vertico--index)
+           default-directory)))
+      (format "  --frame:                  %S (live=%S, visible=%S)\n"
+              vertico-posframe-preview--frame
+              (and (frame-live-p vertico-posframe-preview--frame))
+              (and (frame-live-p vertico-posframe-preview--frame)
+                   (frame-visible-p vertico-posframe-preview--frame)))
+      (format "  preview-buffer:           %S\n"
+              (get-buffer vertico-posframe-preview--buffer))))))
+
 (defun vertico-posframe-preview--show (buffer)
   "Show preview posframe for Vertico minibuffer BUFFER."
   (let ((content (if (buffer-local-value 'vertico-posframe-preview--content-set
@@ -932,7 +1100,8 @@ Argument INFO is the posframe information plist."
 (defun vertico-posframe-preview-cleanup ()
   "Remove frames and buffers used for vertico-posframe preview."
   (interactive)
-  (vertico-posframe-preview--hide))
+  (vertico-posframe-preview--hide)
+  (vertico-posframe-preview--delete-frame))
 
 (defun vertico-posframe-preview--cleanup-advice (&rest _)
   "Clean up preview frames after `vertico-posframe-cleanup'."

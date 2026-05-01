@@ -37,6 +37,7 @@
 
 (require 'posframe)
 (require 'bookmark)
+(require 'imenu)
 (require 'cl-lib)
 (require 'subr-x)
 (require 'vertico)
@@ -914,16 +915,74 @@ against a TRAMP path and block on network I/O."
                 (marker (car-safe position)))
       (vertico-posframe-preview--position marker nil (cdr position)))))
 
+(defun vertico-posframe-preview--imenu-choice (candidate)
+  "Return the imenu choice represented by CANDIDATE."
+  (cond
+   ((or (markerp candidate) (integerp candidate))
+    candidate)
+   ((consp candidate)
+    candidate)
+   ((stringp candidate)
+    (or (get-text-property 0 'vertico-posframe-preview-imenu candidate)
+        (get-text-property 0 'imenu-choice candidate)
+        (when (and (boundp 'minibuffer-completion-table)
+                   (listp minibuffer-completion-table))
+          (vertico-posframe-preview--imenu-choice-in-alist
+           candidate minibuffer-completion-table))
+        (when (and (boundp 'imenu--index-alist)
+                   (listp imenu--index-alist))
+          (vertico-posframe-preview--imenu-choice-in-alist
+           candidate imenu--index-alist))))))
+
+(defun vertico-posframe-preview--imenu-subalist-p (item)
+  "Return non-nil when ITEM is an imenu submenu."
+  (and (consp item)
+       (consp (cdr item))
+       (listp (cadr item))
+       (not (functionp (cadr item)))))
+
+(defun vertico-posframe-preview--imenu-name= (candidate name)
+  "Return non-nil when CANDIDATE and imenu NAME denote the same item."
+  (and (stringp candidate)
+       (stringp name)
+       (string= (substring-no-properties candidate)
+                (substring-no-properties name))))
+
+(defun vertico-posframe-preview--imenu-display-name (name)
+  "Return NAME as displayed by standard imenu completion."
+  (if (and imenu-space-replacement
+           (stringp name)
+           (> (length imenu-space-replacement) 0))
+      (subst-char-in-string ?\s (aref imenu-space-replacement 0) name)
+    name))
+
+(defun vertico-posframe-preview--imenu-choice-in-alist
+    (candidate alist &optional prefix)
+  "Find CANDIDATE recursively in imenu ALIST.
+PREFIX is used for flattened imenu display names."
+  (catch 'choice
+    (dolist (item alist)
+      (when (consp item)
+        (let* ((name (vertico-posframe-preview--imenu-display-name
+                      (car item)))
+               (flat-name (and prefix
+                               (stringp name)
+                               (concat prefix imenu-level-separator name))))
+          (cond
+           ((vertico-posframe-preview--imenu-subalist-p item)
+            (when-let* ((choice
+                         (vertico-posframe-preview--imenu-choice-in-alist
+                          candidate
+                          (cdr item)
+                          (or flat-name name))))
+              (throw 'choice choice)))
+           ((or (vertico-posframe-preview--imenu-name= candidate name)
+                (vertico-posframe-preview--imenu-name= candidate flat-name))
+            (throw 'choice item))))))))
+
 (defun vertico-posframe-preview-imenu (candidate)
   "Return imenu preview content for CANDIDATE."
-  (let* ((item (cond
-                ((or (markerp candidate) (integerp candidate))
-                 candidate)
-                ((consp candidate)
-                 candidate)
-                ((stringp candidate)
-                 (or (get-text-property 0 'vertico-posframe-preview-imenu candidate)
-                     (get-text-property 0 'imenu-choice candidate)))))
+  (let* ((item (vertico-posframe-preview--imenu-choice candidate))
          (position (cdr-safe item)))
     (vertico-posframe-preview--position (or position item))))
 

@@ -82,6 +82,32 @@
       (should (string-match-p "beta"
                               (vertico-posframe-preview-imenu marker))))))
 
+(ert-deftest vertico-posframe-preview-imenu-uses-completion-table ()
+  (with-temp-buffer
+    (insert "alpha\nbeta\ngamma\n")
+    (let ((marker (copy-marker 8))
+          (minibuffer-completion-table nil)
+          (vertico-posframe-preview-location-context 0)
+          (vertico-posframe-preview-auto-location-context nil))
+      (setq minibuffer-completion-table `(("section" . ,marker)))
+      (should (string-match-p "beta"
+                              (vertico-posframe-preview-imenu "section"))))))
+
+(ert-deftest vertico-posframe-preview-imenu-uses-index-alist-recursively ()
+  (with-temp-buffer
+    (insert "alpha\nbeta\ngamma\n")
+    (let ((marker (copy-marker 8))
+          (minibuffer-completion-table nil)
+          (imenu--index-alist nil)
+          (imenu-level-separator ":")
+          (imenu-space-replacement ".")
+          (vertico-posframe-preview-location-context 0)
+          (vertico-posframe-preview-auto-location-context nil))
+      (setq imenu--index-alist `(("Parent Section" ("Child Item" . ,marker))))
+      (should (string-match-p "beta"
+                              (vertico-posframe-preview-imenu
+                               "Parent.Section:Child.Item"))))))
+
 (ert-deftest vertico-posframe-preview-frame-color-falls-back-from-unspecified ()
   (cl-letf (((symbol-function 'face-attribute)
              (lambda (face attribute &rest _)

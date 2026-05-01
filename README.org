@@ -109,8 +109,8 @@ Consult preview mirroring.  If Consult is loaded later, call:
   (vertico-posframe-preview-refresh-integrations)
 #+end_src
 
-The default preview function supports common file, buffer, location, grep,
-imenu, and xref candidates.  Customize
+The default preview function supports common file, buffer, bookmark, location,
+grep, imenu, and xref candidates.  Customize
 =vertico-posframe-preview-category-functions= or
 =vertico-posframe-preview-command-functions= to add command-specific previews.
 

@@ -268,6 +268,52 @@ shadow string as the path."
           (should-not (vertico-posframe-preview-file file)))
       (delete-file file))))
 
+(ert-deftest vertico-posframe-preview-bookmark-previews-file-position ()
+  (let ((file (make-temp-file "vpp-bookmark-file-")))
+    (unwind-protect
+        (let ((bookmark-alist
+               `(("file-bookmark"
+                  (filename . ,file)
+                  (position . 8)
+                  (annotation . ""))))
+              (vertico-posframe-preview-binary-detect-bytes nil)
+              (vertico-posframe-preview-location-context 0)
+              (vertico-posframe-preview-auto-location-context nil)
+              (vertico-posframe-preview-io-timeout nil))
+          (with-temp-buffer
+            (insert "alpha\nbeta\ngamma\n")
+            (write-region (point-min) (point-max) file))
+          (should (string-match-p "beta"
+                                  (vertico-posframe-preview-bookmark
+                                   "file-bookmark"))))
+      (when (file-exists-p file) (delete-file file)))))
+
+(ert-deftest vertico-posframe-preview-bookmark-previews-directory ()
+  (let ((directory (make-temp-file "vpp-bookmark-dir-" t)))
+    (unwind-protect
+        (let ((bookmark-alist
+               `(("dir-bookmark"
+                  (filename . ,directory)
+                  (position . nil)
+                  (annotation . ""))))
+              (vertico-posframe-preview-directory-max-entries 2)
+              (vertico-posframe-preview-io-timeout nil))
+          (dolist (file '("a" "b" "c"))
+            (with-temp-file (expand-file-name file directory)))
+          (should (equal (vertico-posframe-preview-bookmark "dir-bookmark")
+                         "a\nb\n...")))
+      (delete-directory directory t))))
+
+(ert-deftest vertico-posframe-preview-bookmark-falls-back-to-summary ()
+  (let ((bookmark-alist
+         '(("non-file-bookmark"
+            (location . "custom location")
+            (annotation . "bookmark note")))))
+    (let ((preview (vertico-posframe-preview-bookmark "non-file-bookmark")))
+      (should (string-match-p "non-file-bookmark" preview))
+      (should (string-match-p "custom location" preview))
+      (should (string-match-p "bookmark note" preview)))))
+
 (ert-deftest vertico-posframe-preview-location-handles-cons-candidate ()
   (with-temp-buffer
     (insert "alpha\nbeta\ngamma\n")

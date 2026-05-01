@@ -36,6 +36,7 @@
 ;;; Code:
 
 (require 'posframe)
+(require 'bookmark)
 (require 'cl-lib)
 (require 'subr-x)
 (require 'vertico)
@@ -67,7 +68,10 @@ contents will be copied, or nil to hide the preview posframe."
   '((switch-to-buffer . vertico-posframe-preview-buffer)
     (switch-to-buffer-other-window . vertico-posframe-preview-buffer)
     (switch-to-buffer-other-frame . vertico-posframe-preview-buffer)
-    (project-switch-to-buffer . vertico-posframe-preview-buffer))
+    (project-switch-to-buffer . vertico-posframe-preview-buffer)
+    (bookmark-jump . vertico-posframe-preview-bookmark)
+    (bookmark-jump-other-window . vertico-posframe-preview-bookmark)
+    (bookmark-jump-other-frame . vertico-posframe-preview-bookmark))
   "Alist of commands and preview functions.
 
 This is a fallback for commands which do not provide useful
@@ -86,7 +90,8 @@ Each preview function is called with the current candidate string."
     (consult-grep . vertico-posframe-preview-grep)
     (imenu . vertico-posframe-preview-imenu)
     (xref-location . vertico-posframe-preview-xref)
-    (consult-xref . vertico-posframe-preview-xref))
+    (consult-xref . vertico-posframe-preview-xref)
+    (bookmark . vertico-posframe-preview-bookmark))
   "Alist of completion categories and preview functions.
 
 Each preview function is called with the current candidate string.
@@ -753,6 +758,55 @@ variables are handled the same way `find-file' would."
                          candidate
                        (get-buffer (substring-no-properties candidate)))))
     buffer))
+
+(defun vertico-posframe-preview--bookmark-summary (bookmark)
+  "Return a textual summary for BOOKMARK."
+  (let* ((name (car-safe bookmark))
+         (location (ignore-errors (bookmark-location bookmark)))
+         (annotation (ignore-errors (bookmark-get-annotation bookmark)))
+         (lines (delq nil
+                      (list (and name (format "Bookmark: %s" name))
+                            (and location (format "Location: %s" location))
+                            (and (stringp annotation)
+                                 (not (string-empty-p annotation))
+                                 annotation)))))
+    (and lines (mapconcat #'identity lines "\n"))))
+
+(defun vertico-posframe-preview--bookmark-file (file position)
+  "Return preview content for bookmark FILE at POSITION."
+  (when (and file
+             (not (file-remote-p file))
+             (not (file-remote-p default-directory)))
+    (vertico-posframe-preview--with-io-timeout
+      (cond
+       ((file-directory-p file)
+        (mapconcat #'identity
+                   (vertico-posframe-preview--directory-entries file)
+                   "\n"))
+       ((file-regular-p file)
+        (unless (vertico-posframe-preview--binary-file-p file)
+          (if (integer-or-marker-p position)
+              (let ((buffer (find-file-noselect file)))
+                (with-current-buffer buffer
+                  (vertico-posframe-preview--position
+                   (if (markerp position)
+                       position
+                     (copy-marker (max (point-min)
+                                       (min (point-max) position)))))))
+            (with-temp-buffer
+              (insert-file-contents file nil 0 vertico-posframe-preview-max-size)
+              (buffer-string)))))))))
+
+(defun vertico-posframe-preview-bookmark (candidate)
+  "Return bookmark preview content for CANDIDATE."
+  (when-let* ((bookmark (ignore-errors
+                          (bookmark-get-bookmark
+                           (substring-no-properties candidate)
+                           t))))
+    (let* ((file (ignore-errors (bookmark-get-filename bookmark)))
+           (position (ignore-errors (bookmark-get-position bookmark))))
+      (or (vertico-posframe-preview--bookmark-file file position)
+          (vertico-posframe-preview--bookmark-summary bookmark)))))
 
 (defun vertico-posframe-preview--position-marker (position)
   "Return a marker for POSITION."

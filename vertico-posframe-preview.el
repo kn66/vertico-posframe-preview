@@ -720,6 +720,50 @@ nil when detection is disabled or the file is empty."
         (append (butlast entries) '("..."))
       entries)))
 
+(defun vertico-posframe-preview--local-file-p (file)
+  "Return non-nil when FILE can be previewed without remote I/O."
+  (and file
+       (not (file-remote-p file))
+       (not (file-remote-p default-directory))))
+
+(defun vertico-posframe-preview--directory-content (directory)
+  "Return preview content for DIRECTORY."
+  (mapconcat #'identity
+             (vertico-posframe-preview--directory-entries directory)
+             "\n"))
+
+(defun vertico-posframe-preview--file-content (file)
+  "Return preview content for regular FILE."
+  (unless (vertico-posframe-preview--binary-file-p file)
+    (with-temp-buffer
+      (insert-file-contents file nil 0 vertico-posframe-preview-max-size)
+      (buffer-string))))
+
+(defun vertico-posframe-preview--file-position-content (file position)
+  "Return preview content for FILE around POSITION."
+  (unless (vertico-posframe-preview--binary-file-p file)
+    (let ((buffer (find-file-noselect file)))
+      (with-current-buffer buffer
+        (vertico-posframe-preview--position
+         (if (markerp position)
+             position
+           (copy-marker (max (point-min)
+                             (min (point-max) position)))))))))
+
+(defun vertico-posframe-preview--file-preview (file &optional position)
+  "Return preview content for local FILE.
+When POSITION is an integer or marker and FILE is regular, show
+content around that position."
+  (when (vertico-posframe-preview--local-file-p file)
+    (vertico-posframe-preview--with-io-timeout
+      (cond
+       ((file-directory-p file)
+        (vertico-posframe-preview--directory-content file))
+       ((file-regular-p file)
+        (if (integer-or-marker-p position)
+            (vertico-posframe-preview--file-position-content file position)
+          (vertico-posframe-preview--file-content file)))))))
+
 (defun vertico-posframe-preview-file (candidate)
   "Return file preview content for CANDIDATE.
 
@@ -740,18 +784,7 @@ variables are handled the same way `find-file' would."
                (not (file-remote-p raw))
                (not (file-remote-p default-directory)))
       (let ((file (ignore-errors (expand-file-name raw))))
-        (when (and file (not (file-remote-p file)))
-          (vertico-posframe-preview--with-io-timeout
-            (cond
-             ((file-regular-p file)
-              (unless (vertico-posframe-preview--binary-file-p file)
-                (with-temp-buffer
-                  (insert-file-contents file nil 0 vertico-posframe-preview-max-size)
-                  (buffer-string))))
-             ((file-directory-p file)
-              (mapconcat #'identity
-                         (vertico-posframe-preview--directory-entries file)
-                         "\n")))))))))
+        (vertico-posframe-preview--file-preview file)))))
 
 (defun vertico-posframe-preview-buffer (candidate)
   "Return buffer preview content for CANDIDATE."
@@ -775,28 +808,7 @@ variables are handled the same way `find-file' would."
 
 (defun vertico-posframe-preview--bookmark-file (file position)
   "Return preview content for bookmark FILE at POSITION."
-  (when (and file
-             (not (file-remote-p file))
-             (not (file-remote-p default-directory)))
-    (vertico-posframe-preview--with-io-timeout
-      (cond
-       ((file-directory-p file)
-        (mapconcat #'identity
-                   (vertico-posframe-preview--directory-entries file)
-                   "\n"))
-       ((file-regular-p file)
-        (unless (vertico-posframe-preview--binary-file-p file)
-          (if (integer-or-marker-p position)
-              (let ((buffer (find-file-noselect file)))
-                (with-current-buffer buffer
-                  (vertico-posframe-preview--position
-                   (if (markerp position)
-                       position
-                     (copy-marker (max (point-min)
-                                       (min (point-max) position)))))))
-            (with-temp-buffer
-              (insert-file-contents file nil 0 vertico-posframe-preview-max-size)
-              (buffer-string)))))))))
+  (vertico-posframe-preview--file-preview file position))
 
 (defun vertico-posframe-preview-bookmark (candidate)
   "Return bookmark preview content for CANDIDATE."

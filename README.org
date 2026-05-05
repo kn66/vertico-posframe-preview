@@ -82,6 +82,38 @@ It uses a dynamic module for fast scoring, with prebuilt modules available for
 immediate use.  High-scoring candidates are highlighted with bold and underline,
 which makes useful items easier to spot in large completion lists.
 
+** Alternative: vertico-buffer-frame
+
+This package has a successor/alternative:
+[[https://github.com/kn66/vertico-buffer-frame][vertico-buffer-frame]].
+
+=vertico-buffer-frame= was created from the same line of experiments, but it
+uses =vertico-buffer-mode= and Emacs' built-in
+=display-buffer-in-child-frame= instead of =posframe= and
+=vertico-posframe=.  If you are choosing a package now, try
+=vertico-buffer-frame= first unless you specifically want to keep using
+=vertico-posframe=.
+
+The main differences are:
+
+- =vertico-posframe-preview= extends =vertico-posframe= by adding a second
+  posframe for preview content.  =vertico-buffer-frame= does not depend on
+  =posframe= or =vertico-posframe=.
+- =vertico-buffer-frame= keeps the minibuffer prompt width intact by default
+  and overlays the preview on the lower-right side of the candidate child
+  frame.  This is more comfortable for long input, such as file renames and
+  path editing.  It can also place candidate and preview frames side by side
+  with =vertico-buffer-frame-preview-layout= set to =side-by-side=.
+- =vertico-posframe-preview= uses a side-by-side candidate/preview layout based
+  on =vertico-posframe= and can mirror Consult preview state more directly.
+  To do that, it intentionally advises private =vertico-posframe= and Consult
+  internals.  =vertico-buffer-frame= avoids the =vertico-posframe= dependency
+  and generates previews from completion metadata, candidate properties, and
+  category-specific preview functions.
+- =vertico-buffer-frame= supports graphical child frames and terminal child
+  frames when Emacs provides the =tty-child-frames= feature.  Older terminal
+  Emacs versions fall back through Emacs' normal display-buffer behavior.
+
 ** Usage
 
 Put the package on =load-path=, then enable both Vertico posframe and the
